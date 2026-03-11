@@ -9,7 +9,16 @@ MEIN_API_KEY = st.secrets["GEMINI_API_KEY"]
 
 st.set_page_config(layout="wide") # Macht die App schön breit
 st.title("Meine Profi-Heizlast-App 🏠🤖")
-
+# --- NEU: KURZE BESCHREIBUNG ---
+with st.expander("📖 Kurzanleitung: So nutzt du die App", expanded=False):
+    st.markdown("""
+    **Willkommen beim KI-Heizlast-Assistenten!** Dieses Tool hilft dir, aus alten Grundrissen schnell technische Daten für die Heizungsplanung zu gewinnen.
+    
+    * **⚡ Schnelle Gebäude-Schätzung:** Ideal für den Ersttermin. Die KI schätzt die Wohnfläche des gesamten Stockwerks und gibt dir eine grobe Heizlast in kW aus.
+    * **🔍 Detailliert (Raum-für-Raum):** Hier kannst du gezielt einzelne Räume analysieren lassen. Die KI misst Wandlängen und Fensterbreiten. Du kannst jeden Raum speichern und so eine Liste für das ganze Gebäude erstellen.
+    
+    *Hinweis: Da die KI "schätzt", solltest du die Werte im Detail-Modus kurz prüfen, bevor du sie speicherst.*
+    """)
 # --- 2. DAS GEDÄCHTNIS DER APP ---
 if 'ki_wandflaeche' not in st.session_state: st.session_state['ki_wandflaeche'] = 0.0
 if 'ki_fensterflaeche' not in st.session_state: st.session_state['ki_fensterflaeche'] = 0.0
@@ -161,3 +170,4 @@ with tab_detail:
         gesamtheizlast = sum(raum["Heizlast (W)"] for raum in st.session_state['raeume'])
 
         st.error(f"🔥 **Summe der erfassten Räume: {round(gesamtheizlast, 2)} Watt**")
+
