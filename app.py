@@ -16,7 +16,7 @@ if 'ki_fensterflaeche' not in st.session_state: st.session_state['ki_fensterflae
 if 'ki_gesamtflaeche' not in st.session_state: st.session_state['ki_gesamtflaeche'] = 0.0
 if 'raeume' not in st.session_state: st.session_state['raeume'] = []
 
-# --- 3. BILD/PDF UPLOAD (Gilt für beide Wege) ---
+# --- 3. BILD/PDF UPLOAD (Speed-Tuning 🚀) ---
 st.header("1. Grundriss hochladen")
 hochgeladene_datei = st.file_uploader("Wähle eine Datei (PDF, JPG, PNG)", type=["pdf", "jpg", "png", "jpeg"])
 
@@ -26,12 +26,14 @@ if hochgeladene_datei is not None:
     if dateiendung == "pdf":
         pdf_dokument = fitz.open(stream=hochgeladene_datei.read(), filetype="pdf")
         erste_seite = pdf_dokument.load_page(0)
-        pixel_bild = erste_seite.get_pixmap(dpi=150)
+        # TUNING 1: Auflösung (DPI) von 150 auf 72 halbiert. Das Bild wird viel kleiner!
+        pixel_bild = erste_seite.get_pixmap(dpi=72)
         bild = Image.open(io.BytesIO(pixel_bild.tobytes("png")))
     else:
         bild = Image.open(hochgeladene_datei)
+        # TUNING 2: Wenn du ein Handyfoto hochlädst, dampfen wir es hier maximal ein
+        bild.thumbnail((1024, 1024)) 
     
-    # Zeigt das Bild einklappbar an, um Platz zu sparen
     with st.expander("Grundriss ein/ausblenden", expanded=True):
         st.image(bild, use_container_width=True)
 
@@ -157,4 +159,5 @@ with tab_detail:
     if len(st.session_state['raeume']) > 0:
         st.dataframe(st.session_state['raeume'], use_container_width=True)
         gesamtheizlast = sum(raum["Heizlast (W)"] for raum in st.session_state['raeume'])
+
         st.error(f"🔥 **Summe der erfassten Räume: {round(gesamtheizlast, 2)} Watt**")
