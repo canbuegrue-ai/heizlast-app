@@ -166,8 +166,23 @@ with tab_detail:
 
     # Tabelle anzeigen
     if len(st.session_state['raeume']) > 0:
-        st.dataframe(st.session_state['raeume'], use_container_width=True)
+        import pandas as pd # Importieren wir hier kurz für die Tabelle
+        df = pd.DataFrame(st.session_state['raeume'])
+        st.dataframe(df, use_container_width=True)
+        
         gesamtheizlast = sum(raum["Heizlast (W)"] for raum in st.session_state['raeume'])
-
         st.error(f"🔥 **Summe der erfassten Räume: {round(gesamtheizlast, 2)} Watt**")
+
+        # --- NEU: DOWNLOAD BUTTON ---
+        csv = df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📊 Liste als Excel/CSV herunterladen",
+            data=csv,
+            file_name=f"Heizlast_{raum_name}.csv",
+            mime='text/csv',
+        )
+
+        if st.button("🗑️ Liste leeren"):
+            st.session_state['raeume'] = []
+            st.rerun()
 
