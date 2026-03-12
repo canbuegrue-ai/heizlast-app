@@ -1,73 +1,169 @@
 import streamlit as st
+from PIL import Image
+import google.generativeai as genai
+import fitz  
+import io    
 import pandas as pd
-from reportlab.lib.pagesizes import letter
+from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
-import io
 
-# --- KfW KONSTANTEN ---
-RAUMTEMP_DEFAULT = {"Wohnen": 20, "Bad": 24, "Schlafen": 18, "Küche": 20, "Flur": 15}
+# --- 1. KONFIGURATION & SECRETS ---
+try:
+    MEIN_API_KEY = st.secrets["GEMINI_API_KEY"]
+except:
+    MEIN_API_KEY = "AIzaSyDZtWX4sK-SkYPN2Ct0iEHsghoZsJTA394"
 
-# 1. Standort / Außentemperatur (KfW Anforderung)
-st.subheader("📍 Projekt-Stammdaten")
-col_plz, col_temp = st.columns(2)
-with col_plz:
-    plz = st.text_input("Postleitzahl des Objekts", "12345")
-with col_temp:
+st.set_page_config(layout="wide", page_title="KfW Heizlast-Assistent")
+
+# --- 2. SESSION STATE (DAS GEDÄCHTNIS) ---
+if 'raeume' not in st.session_state: st.session_state['raeume'] = []
+if 'ki_flaeche' not in st.session_state: st.session_state['ki_flaeche'] = 0.0
+
+# --- 3. FUNKTION: PDF PROTOKOLL ERSTELLEN ---
+def erstelle_kfw_pdf(projekt_daten, raum_liste):
+    buffer = io.BytesIO()
+    p = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+    
+    # Header
+    p.setFont("Helvetica-Bold", 16)
+    p.drawString(50, height - 50, "KfW-Heizlastprotokoll & Hydraulischer Abgleich")
+    p.setFont("Helvetica", 10)
+    p.drawString(50, height - 70, f"Projekt: {projekt_daten['name']} | Ort: {projekt_daten['plz']}")
+    p.drawString(50, height - 85, f"Norm-Außentemperatur: {projekt_daten['t_aussen']} °C")
+    
+    # Tabelle Header
+    y = height - 130
+    p.setFont("Helvetica-Bold", 10)
+    p.drawString(50, y, "Raum")
+    p.drawString(150, y, "Fläche (m²)")
+    p.drawString(220, y, "Soll-Temp (°C)")
+    p.drawString(320, y, "Heizlast (W)")
+    p.drawString(420, y, "Spez. Last (W/m²)")
+    
+    p.line(50, y-5, 550, y-5)
+    y -= 25
+    
+    # Daten
+    p.setFont("Helvetica", 10)
+    gesamtsumme = 0
+    for r in raum_liste:
+        p.drawString(50, y, str(r['Raum']))
+        p.drawString(150, y, str(r['Fläche']))
+        p.drawString(220, y, str(r['T_Soll']))
+        p.drawString(320, y, str(r['Heizlast']))
+        p.drawString(420, y, str(round(r['Heizlast']/r['Fläche'], 1)))
+        gesamtsumme += r['Heizlast']
+        y -= 20
+        if y < 50: # Neue Seite falls voll
+            p.showPage()
+            y = height - 50
+
+    p.line(50, y, 550, y)
+    p.setFont("Helvetica-Bold", 11)
+    p.drawString(320, y-20, f"Gesamt: {gesamtsumme} Watt")
+    
+    p.showPage()
+    p.save()
+    return buffer.getvalue()
+
+# --- 4. HAUPT-APP ---
+st.title("🏠 KfW-Heizlast-Protokoll Pro")
+
+with st.expander("📖 Anleitung für KfW-Nachweis", expanded=False):
+    st.write("""
+    Dieses Tool erstellt eine raumweise Heizlastberechnung nach DIN EN 12831 (vereinfacht).
+    1. Stammdaten eingeben (PLZ bestimmt Außentemperatur).
+    2. Grundriss hochladen.
+    3. Räume einzeln erfassen (KI hilft bei der Flächenmessung).
+    4. PDF-Protokoll für KfW / Hydraulischen Abgleich exportieren.
+    """)
+
+# Stammdaten
+col_a, col_b, col_c = st.columns(3)
+with col_a:
+    projekt_name = st.text_input("Bauvorhaben / Kunde", "Müller - Neubau")
+with col_b:
+    plz = st.text_input("PLZ des Objekts", "12345")
+with col_c:
     t_aussen = st.number_input("Norm-Außentemperatur (°C)", value=-12)
 
 st.divider()
 
-# 2. Raum-Eingabe (KfW konform)
-st.subheader("🚪 Raumweise Erfassung")
-nutzung = st.selectbox("Raumnutzung", list(RAUMTEMP_DEFAULT.keys()))
-t_innen = RAUMTEMP_DEFAULT[nutzung]
+# Upload
+hochgeladene_datei = st.file_uploader("Grundriss hochladen (PDF/Bild)", type=["pdf", "jpg", "png", "jpeg"])
+bild = None
+if hochgeladene_datei:
+    if hochgeladene_datei.name.lower().endswith("pdf"):
+        doc = fitz.open(stream=hochgeladene_datei.read(), filetype="pdf")
+        page = doc.load_page(0)
+        pix = page.get_pixmap(dpi=72) # Schnelles Laden
+        bild = Image.open(io.BytesIO(pix.tobytes("png")))
+    else:
+        bild = Image.open(hochgeladene_datei)
+        bild.thumbnail((1024, 1024))
+    st.image(bild, caption="Geladener Plan", use_container_width=True)
 
-col_r1, col_r2, col_r3 = st.columns(3)
-with col_r1:
-    r_breite = st.number_input("Raumbreite (m)", value=4.0)
-with col_r2:
-    r_laenge = st.number_input("Raumlänge (m)", value=5.0)
-with col_r3:
-    r_hoehe = st.number_input("Raumhöhe (m)", value=2.5)
+st.divider()
 
-raum_flaeche = r_breite * r_laenge
-raum_volumen = raum_flaeche * r_hoehe
+# Raumweise Erfassung
+st.subheader("🚪 Raumweise Berechnung")
+col1, col2 = st.columns([1, 2])
 
-# 3. Bauteile des Raums
-st.write("🧱 **Bauteile gegen Außenluft / Unbeheizt**")
-# Hier könnte man eine Liste von Wänden hinzufügen
-u_wand = st.number_input("U-Wert Außenwand (W/m²K)", value=0.3)
-a_wand = st.number_input("Netto-Wandfläche (m²)", value=10.0)
+with col1:
+    raum_name = st.selectbox("Raumtyp", ["Wohnen", "Küche", "Bad", "Schlafen", "Kind", "Flur", "WC"])
+    t_soll = {"Wohnen": 20, "Küche": 20, "Bad": 24, "Schlafen": 18, "Kind": 20, "Flur": 15, "WC": 20}[raum_name]
+    
+    if st.button("🔍 KI: Fläche messen"):
+        if bild and MEIN_API_KEY:
+            genai.configure(api_key=MEIN_API_KEY)
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            prompt = f"Suche den Raum '{raum_name}' im Plan. Berechne die Grundfläche in m². Gib NUR die Zahl aus."
+            res = model.generate_content([prompt, bild])
+            try:
+                st.session_state['ki_flaeche'] = float(res.text.strip().replace(",", "."))
+            except: st.error("KI konnte Fläche nicht lesen.")
+    
+    flaeche = st.number_input("Raumfläche (m²)", value=st.session_state['ki_flaeche'])
+    hoehe = st.number_input("Raumhöhe (m)", value=2.5)
+    u_wert = st.number_input("Mittlerer U-Wert Bauteile (W/m²K)", value=0.35, help="Durchschnitt aller Außenwände/Fenster")
 
-# Berechnung Transmission + Lüftung
-delta_t = t_innen - t_aussen
-q_transmission = a_wand * u_wand * delta_t
-q_lueftung = 0.5 * 0.34 * raum_volumen * delta_t # 0.5facher Luftwechsel
-gesamt_heizlast = round(q_transmission + q_lueftung, 0)
+    # Berechnung nach Norm
+    volumen = flaeche * hoehe
+    delta_t = t_soll - t_aussen
+    # Q_trans = Fläche_Hüllflächen * U * delta_t (vereinfacht: Fläche_Raum * 1.2 Korrektur für Hülle)
+    q_trans = (flaeche * 1.2) * u_wert * delta_t 
+    q_lueft = volumen * 0.5 * 0.34 * delta_t # 0.5-facher Luftwechsel
+    heizlast_raum = round(q_trans + q_lueft, 0)
+    
+    st.info(f"Ergebnis: {heizlast_raum} Watt")
+    
+    if st.button("💾 Raum speichern"):
+        st.session_state['raeume'].append({
+            "Raum": raum_name, "Fläche": flaeche, 
+            "T_Soll": t_soll, "Heizlast": heizlast_raum
+        })
+        st.rerun()
 
-st.metric("Heizlast für diesen Raum", f"{gesamt_heizlast} Watt")
-
-if st.button("💾 Raum zum KfW-Protokoll hinzufügen"):
-    st.session_state['raeume'].append({
-        "Raum": nutzung,
-        "Fläche": raum_flaeche,
-        "Heizlast": gesamt_heizlast,
-        "Temp_Innen": t_innen
-    })
-    st.success("Raum gespeichert!")
-
-# 4. PDF Export (Das Dokument für die KfW)
-if len(st.session_state['raeume']) > 0:
-    st.divider()
-    if st.button("📄 KfW-Protokoll als PDF erstellen"):
-        buffer = io.BytesIO()
-        p = canvas.Canvas(buffer)
-        p.drawString(100, 800, f"Heizlastberechnung & Hydraulischer Abgleich - PLZ: {plz}")
-        p.drawString(100, 780, "---------------------------------------------------------")
-        y = 750
-        for r in st.session_state['raeume']:
-            p.drawString(100, y, f"Raum: {r['Raum']} | {r['Fläche']}m² | Soll: {r['Temp_Innen']}°C | Last: {r['Heizlast']} W")
-            y -= 20
-        p.showPage()
-        p.save()
-        st.download_button("📥 PDF Herunterladen", data=buffer.getvalue(), file_name="KfW_Protokoll.pdf", mime="application/pdf")
+with col2:
+    if st.session_state['raeume']:
+        df = pd.DataFrame(st.session_state['raeume'])
+        st.table(df)
+        
+        summe = df['Heizlast'].sum()
+        st.metric("Gesamtheizlast Gebäude", f"{summe} Watt")
+        
+        # PDF DOWNLOAD
+        projekt_daten = {"name": projekt_name, "plz": plz, "t_aussen": t_aussen}
+        pdf_data = erstelle_kfw_pdf(projekt_daten, st.session_state['raeume'])
+        
+        st.download_button(
+            label="📄 KfW-Protokoll (PDF) herunterladen",
+            data=pdf_data,
+            file_name=f"Heizlast_{projekt_name}.pdf",
+            mime="application/pdf"
+        )
+        
+        if st.button("🗑️ Liste leeren"):
+            st.session_state['raeume'] = []
+            st.rerun()
