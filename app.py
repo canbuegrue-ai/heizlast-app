@@ -11,7 +11,7 @@ from reportlab.pdfgen import canvas
 try:
     MEIN_API_KEY = st.secrets["GEMINI_API_KEY"]
 except:
-    MEIN_API_KEY = "AIzaSyDZtWX4sK-SkYPN2Ct0iEHsghoZsJTA394"
+    MEIN_API_KEY = ""
 
 st.set_page_config(layout="wide", page_title="KfW Heizlast-Assistent")
 
@@ -52,16 +52,16 @@ def erstelle_kfw_pdf(projekt_daten, raum_liste):
         p.drawString(150, y, str(r['Fläche']))
         p.drawString(220, y, str(r['T_Soll']))
         p.drawString(320, y, str(r['Heizlast']))
-        p.drawString(420, y, str(round(r['Heizlast']/r['Fläche'], 1)))
+        p.drawString(420, y, str(round(r['Heizlast']/r['Fläche'] if r['Fläche'] > 0 else 0, 1)))
         gesamtsumme += r['Heizlast']
         y -= 20
-        if y < 50: # Neue Seite falls voll
+        if y < 50:
             p.showPage()
             y = height - 50
 
     p.line(50, y, 550, y)
     p.setFont("Helvetica-Bold", 11)
-    p.drawString(320, y-20, f"Gesamt: {gesamtsumme} Watt")
+    p.drawString(320, y-20, f"Gesamt: {int(gesamtsumme)} Watt")
     
     p.showPage()
     p.save()
@@ -97,7 +97,7 @@ if hochgeladene_datei:
     if hochgeladene_datei.name.lower().endswith("pdf"):
         doc = fitz.open(stream=hochgeladene_datei.read(), filetype="pdf")
         page = doc.load_page(0)
-        pix = page.get_pixmap(dpi=72) # Schnelles Laden
+        pix = page.get_pixmap(dpi=72)
         bild = Image.open(io.BytesIO(pix.tobytes("png")))
     else:
         bild = Image.open(hochgeladene_datei)
@@ -116,27 +116,37 @@ with col1:
     
     if st.button("🔍 KI: Fläche messen"):
         if bild and MEIN_API_KEY:
-            genai.configure(api_key=MEIN_API_KEY)
-            model = genai.GenerativeModel('models/gemini-1.5-flash')
-            prompt = f"Suche den Raum '{raum_name}' im Plan. Berechne die Grundfläche in m². Gib NUR die Zahl aus."
-            res = model.generate_content([prompt, bild])
             try:
-                st.session_state['ki_flaeche'] = float(res.text.strip().replace(",", "."))
-            except: st.error("KI konnte Fläche nicht lesen.")
+                genai.configure(api_key=MEIN_API_KEY)
+                # Stabilster Modellaufruf
+                model = genai.GenerativeModel('gemini-1.5-flash')
+                
+                prompt = f"Analysiere diesen Grundriss. Suche den Raum '{raum_name}'. Schätze seine Grundfläche in Quadratmetern. Gib NUR die Zahl aus (z.B. 15.5)."
+                res = model.generate_content([prompt, bild])
+                
+                # Filtert nur die Zahlen aus der Antwort (macht es extrem robust)
+                clean_text = "".join(c for c in res.text if c.isdigit() or c in ".,")
+                if clean_text:
+                    st.session_state['ki_flaeche'] = float(clean_text.replace(",", "."))
+                    st.success(f"KI hat {st.session_state['ki_flaeche']} m² erkannt.")
+                else:
+                    st.warning("KI hat keine eindeutige Zahl geliefert.")
+            except Exception as e:
+                st.error("KI-Dienst momentan überlastet. Bitte Fläche manuell eingeben.")
+                # Log für dich (optional): st.write(f"Fehlerdetails: {e}")
     
-    flaeche = st.number_input("Raumfläche (m²)", value=st.session_state['ki_flaeche'])
+    flaeche = st.number_input("Raumfläche (m²)", value=st.session_state['ki_flaeche'], step=0.1)
     hoehe = st.number_input("Raumhöhe (m)", value=2.5)
-    u_wert = st.number_input("Mittlerer U-Wert Bauteile (W/m²K)", value=0.35, help="Durchschnitt aller Außenwände/Fenster")
+    u_wert = st.number_input("U-Wert (W/m²K)", value=0.35, help="Durchschnittswert der Außenbauteile")
 
-    # Berechnung nach Norm
+    # Berechnung nach vereinfachter DIN 12831
     volumen = flaeche * hoehe
     delta_t = t_soll - t_aussen
-    # Q_trans = Fläche_Hüllflächen * U * delta_t (vereinfacht: Fläche_Raum * 1.2 Korrektur für Hülle)
     q_trans = (flaeche * 1.2) * u_wert * delta_t 
-    q_lueft = volumen * 0.5 * 0.34 * delta_t # 0.5-facher Luftwechsel
+    q_lueft = volumen * 0.5 * 0.34 * delta_t 
     heizlast_raum = round(q_trans + q_lueft, 0)
     
-    st.info(f"Ergebnis: {heizlast_raum} Watt")
+    st.info(f"Berechnete Last: {int(heizlast_raum)} Watt")
     
     if st.button("💾 Raum speichern"):
         st.session_state['raeume'].append({
@@ -148,10 +158,10 @@ with col1:
 with col2:
     if st.session_state['raeume']:
         df = pd.DataFrame(st.session_state['raeume'])
-        st.table(df)
+        st.dataframe(df, use_container_width=True)
         
         summe = df['Heizlast'].sum()
-        st.metric("Gesamtheizlast Gebäude", f"{summe} Watt")
+        st.metric("Gesamtheizlast Gebäude", f"{int(summe)} Watt")
         
         # PDF DOWNLOAD
         projekt_daten = {"name": projekt_name, "plz": plz, "t_aussen": t_aussen}
@@ -167,5 +177,3 @@ with col2:
         if st.button("🗑️ Liste leeren"):
             st.session_state['raeume'] = []
             st.rerun()
-
-
