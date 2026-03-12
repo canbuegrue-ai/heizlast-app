@@ -1,4 +1,7 @@
 streamlit
 Pillow
 google-generativeai
+
 PyMuPDF
+reportlab
+pandas
