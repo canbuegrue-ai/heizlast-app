@@ -117,7 +117,7 @@ with col1:
     if st.button("🔍 KI: Fläche messen"):
         if bild and MEIN_API_KEY:
             genai.configure(api_key=MEIN_API_KEY)
-            model = genai.GenerativeModel('gemini-1.5-flash-latest')
+            model = genai.GenerativeModel('models/gemini-1.5-flash')
             prompt = f"Suche den Raum '{raum_name}' im Plan. Berechne die Grundfläche in m². Gib NUR die Zahl aus."
             res = model.generate_content([prompt, bild])
             try:
@@ -167,4 +167,5 @@ with col2:
         if st.button("🗑️ Liste leeren"):
             st.session_state['raeume'] = []
             st.rerun()
+
 
