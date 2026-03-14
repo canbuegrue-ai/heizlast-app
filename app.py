@@ -96,7 +96,7 @@ with c1:
                 try:
                     # Hier nutzen wir das Modell aus deinem Dashboard
                     response = client.models.generate_content(
-                        model='gemini-3-flash',
+                        model='gemini-1.5-flash',
                         contents=[f"Analysiere diesen Grundriss. Wie groß ist der Raum '{r_name}' in m²? Gib nur die nackte Zahl aus.", bild]
                     )
                     # Zahl aus dem Text extrahieren
